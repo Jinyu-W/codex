@@ -148,6 +148,46 @@ pub fn create_tools_raw_json_for_responses_api(
     serde_json::value::to_raw_value(tools).map(Arc::from)
 }
 
+/// Returns raw JSON for providers that only accept free-form text custom tools.
+///
+/// The Responses API accepts `format: {"type": "grammar"}` for constrained
+/// decoding, but several third-party gateways reject it. Downgrading to
+/// `{"type": "text"}` keeps the tool and its description, and the model still
+/// emits free-form text that Codex parses itself.
+pub fn create_tools_raw_json_for_responses_api_with_freeform_text(
+    tools: &[ToolSpec],
+) -> Result<Arc<RawValue>, serde_json::Error> {
+    let mut value = serde_json::to_value(tools)?;
+    downgrade_freeform_formats(&mut value);
+    serde_json::value::to_raw_value(&value).map(Arc::from)
+}
+
+fn downgrade_freeform_formats(value: &mut Value) {
+    match value {
+        Value::Array(items) => {
+            for item in items {
+                downgrade_freeform_formats(item);
+            }
+        }
+        Value::Object(object) => {
+            let is_custom = object.get("type").and_then(Value::as_str) == Some("custom");
+            if is_custom
+                && object
+                    .get("format")
+                    .and_then(|format| format.get("type"))
+                    .and_then(Value::as_str)
+                    == Some("grammar")
+            {
+                object.insert("format".to_string(), serde_json::json!({"type": "text"}));
+            }
+            for nested in object.values_mut() {
+                downgrade_freeform_formats(nested);
+            }
+        }
+        _ => {}
+    }
+}
+
 #[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct ResponsesApiWebSearchFilters {
     #[serde(skip_serializing_if = "Option::is_none")]

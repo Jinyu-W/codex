@@ -1,6 +1,10 @@
+use std::sync::OnceLock;
+
 use codex_protocol::config_types::Personality;
 use codex_protocol::config_types::ReasoningSummary;
 use codex_protocol::openai_models::ConfigShellToolType;
+use codex_protocol::openai_models::ApplyPatchToolType;
+use codex_protocol::openai_models::ToolMode;
 use codex_protocol::openai_models::ModelInfo;
 use codex_protocol::openai_models::ModelMessages;
 use codex_protocol::openai_models::ModelVisibility;
@@ -17,6 +21,9 @@ pub const BASE_INSTRUCTIONS: &str = include_str!("../prompt.md");
 const PERSONALITY_SECTION_HEADER: &str = "# Personality";
 
 pub fn with_config_overrides(mut model: ModelInfo, config: &ModelsManagerConfig) -> ModelInfo {
+    if config.provider_parity {
+        apply_provider_parity_profile(&mut model, config);
+    }
     if let Some(context_window) = config.model_context_window {
         model.context_window = Some(
             model
@@ -56,6 +63,115 @@ pub fn with_config_overrides(mut model: ModelInfo, config: &ModelsManagerConfig)
     }
 
     model
+}
+
+/// OpenAI catalog entry whose profile third-party slugs inherit.
+const PARITY_REFERENCE_SLUG: &str = "gpt-6.1-sol";
+
+/// Gives third-party provider models the exact tool surface OpenAI models get
+/// from the model catalog: the `exec` orchestrator, structured `apply_patch`,
+/// the `clock`/`sleep` nested tools, the multi-agent (`collaboration.*`) tools,
+/// and OpenAI's tool-output truncation policy.
+///
+/// Hand-copying a few fields drifts as the catalog evolves (for example
+/// `multi_agent_version` gates the `collaboration.*` tools and
+/// `truncation_policy` was left at 10k *bytes* instead of OpenAI's 10k
+/// *tokens*), so the profile is inherited from a reference catalog entry
+/// instead.
+fn apply_provider_parity_profile(model: &mut ModelInfo, config: &ModelsManagerConfig) {
+    let from_config_catalog = config
+        .model_catalog
+        .as_ref()
+        .and_then(|catalog| find_parity_reference(&catalog.models));
+    if let Some(reference) = from_config_catalog {
+        inherit_parity_profile(reference, model);
+    } else if let Some(reference) = find_parity_reference(bundled_parity_catalog()) {
+        inherit_parity_profile(reference, model);
+    } else {
+        apply_minimal_parity_profile(model);
+    }
+    // Responses Lite sends tools as an `additional_tools` input item, which
+    // third-party gateways reject. Keep the classic top-level `tools` array.
+    model.use_responses_lite = false;
+}
+
+/// Fields that describe the model/tool surface rather than anything
+/// provider-specific. Context windows, auth, auth transport and pricing stay
+/// untouched: those legitimately differ per endpoint.
+fn inherit_parity_profile(reference: &ModelInfo, model: &mut ModelInfo) {
+    model.tool_mode = reference.tool_mode;
+    model.apply_patch_tool_type = reference.apply_patch_tool_type.clone();
+    model.experimental_supported_tools = reference.experimental_supported_tools.clone();
+    model.shell_type = reference.shell_type;
+    model.web_search_tool_type = reference.web_search_tool_type;
+    model.truncation_policy = reference.truncation_policy;
+    model.multi_agent_version = reference.multi_agent_version;
+    model.multi_agent_reasoning_effort = reference.multi_agent_reasoning_effort.clone();
+    model.include_skills_usage_instructions = reference.include_skills_usage_instructions;
+    model.include_plugin_usage_instructions = reference.include_plugin_usage_instructions;
+    model.include_apps_usage_instructions = reference.include_apps_usage_instructions;
+    model.supports_reasoning_summary_parameter = reference.supports_reasoning_summary_parameter;
+    model.default_reasoning_summary = reference.default_reasoning_summary;
+    model.support_verbosity = reference.support_verbosity;
+    model.default_verbosity = reference.default_verbosity;
+    model.supports_image_detail_original = reference.supports_image_detail_original;
+    model.supports_reasoning_effort_updates = reference.supports_reasoning_effort_updates;
+    model.supported_reasoning_levels = reference.supported_reasoning_levels.clone();
+    model.default_reasoning_level = reference.default_reasoning_level.clone();
+    model.input_modalities = reference.input_modalities.clone();
+    // Deliberately not inherited: `supports_search_tool`. OpenAI models get it
+    // because the OpenAI backend serves the hosted search tool; a third-party
+    // gateway does not, and the flag *removes* direct tool exposure in favour of
+    // the deferred/search path, so copying it would hide tools instead of
+    // matching the surface.
+
+    if reference.tool_mode.is_none() {
+        warn!(
+            "provider parity reference `{}` has no tool_mode; keeping fallback behaviour",
+            reference.slug
+        );
+    }
+}
+
+/// Used only when no catalog entry is available (no catalog at all).
+fn apply_minimal_parity_profile(model: &mut ModelInfo) {
+    model.tool_mode = Some(ToolMode::CodeMode);
+    if model.apply_patch_tool_type.is_none() {
+        model.apply_patch_tool_type = Some(ApplyPatchToolType::Freeform);
+    }
+    if !model
+        .experimental_supported_tools
+        .iter()
+        .any(|tool| tool == "clock")
+    {
+        model
+            .experimental_supported_tools
+            .push("clock".to_string());
+    }
+}
+
+fn find_parity_reference(models: &[ModelInfo]) -> Option<&ModelInfo> {
+    models
+        .iter()
+        .find(|model| model.slug == PARITY_REFERENCE_SLUG)
+        .or_else(|| {
+            models.iter().find(|model| {
+                model.supported_in_api
+                    && matches!(
+                        model.tool_mode,
+                        Some(ToolMode::CodeMode | ToolMode::CodeModeOnly)
+                    )
+            })
+        })
+}
+
+fn bundled_parity_catalog() -> &'static [ModelInfo] {
+    static CATALOG: OnceLock<Vec<ModelInfo>> = OnceLock::new();
+    CATALOG.get_or_init(|| {
+        crate::bundled_models_response()
+            .map(|response| response.models)
+            .unwrap_or_default()
+    })
 }
 
 fn strip_personality_section(mut instructions: String) -> String {

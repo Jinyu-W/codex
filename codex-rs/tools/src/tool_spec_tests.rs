@@ -11,6 +11,7 @@ use crate::ResponsesApiTool;
 use crate::create_tools_json_for_responses_api;
 use crate::create_tools_json_for_responses_lite;
 use crate::create_tools_raw_json_for_responses_api;
+use crate::create_tools_raw_json_for_responses_api_with_freeform_text;
 use codex_protocol::config_types::WebSearchContextSize;
 use codex_protocol::config_types::WebSearchFilters as ConfigWebSearchFilters;
 use codex_protocol::config_types::WebSearchUserLocation as ConfigWebSearchUserLocation;
@@ -410,4 +411,42 @@ fn tool_search_tool_spec_serializes_expected_wire_shape() {
             },
         })
     );
+}
+
+#[test]
+fn freeform_text_serializer_downgrades_grammar_format() {
+    let tools = vec![
+        ToolSpec::Freeform(FreeformTool {
+            name: "exec".to_string(),
+            description: "Run JavaScript".to_string(),
+            defer_loading: None,
+            format: FreeformToolFormat {
+                r#type: "grammar".to_string(),
+                syntax: "lark".to_string(),
+                definition: "start: SOURCE".to_string(),
+            },
+        }),
+        ToolSpec::Freeform(FreeformTool {
+            name: "apply_patch".to_string(),
+            description: "Patch".to_string(),
+            defer_loading: None,
+            format: FreeformToolFormat {
+                r#type: "grammar".to_string(),
+                syntax: "lark".to_string(),
+                definition: "start: begin_patch".to_string(),
+            },
+        }),
+    ];
+
+    let downgraded = create_tools_raw_json_for_responses_api_with_freeform_text(&tools)
+        .expect("serialize downgraded tools");
+    let value: serde_json::Value = serde_json::from_str(downgraded.get()).expect("valid json");
+    let entries = value.as_array().expect("tool array");
+    assert_eq!(entries.len(), 2);
+    for entry in entries {
+        assert_eq!(entry["type"], "custom");
+        assert_eq!(entry["format"]["type"], "text");
+        assert_eq!(entry["format"].get("syntax"), None);
+        assert_eq!(entry["format"].get("definition"), None);
+    }
 }

@@ -9,4 +9,8 @@ pub struct ModelsManagerConfig {
     pub base_instructions: Option<String>,
     pub personality: Option<Personality>,
     pub model_catalog: Option<ModelsResponse>,
+    /// Give third-party provider models the OpenAI-equivalent tool surface.
+    pub provider_parity: bool,
+    /// Send free-form custom tools as `{"type": "text"}` instead of lark grammar.
+    pub freeform_tools_as_text: bool,
 }

@@ -18,6 +18,9 @@ use codex_config::ConstrainedWithSource;
 use codex_config::FeatureRequirementsToml;
 use codex_config::ManagedAuthPolicy;
 use codex_config::McpEnterpriseManagedAuthConfig;
+use codex_config::config_toml::DeveloperRoleToml;
+use codex_config::config_toml::FreeformToolFormatToml;
+use codex_config::config_toml::ProviderParityToml;
 use codex_config::McpServerRequirement;
 use codex_config::PluginRequirementsToml;
 use codex_config::ProfileV2Name;
@@ -642,6 +645,9 @@ pub struct Config {
 
     /// Default Daybreak preference for new threads and non-interactive turns.
     pub daybreak_enabled: bool,
+
+    /// Keeps the OpenAI tool surface when a third-party provider is selected.
+    pub(crate) provider_parity: crate::provider_parity::ProviderParityConfig,
 
     /// Effective service tier request id preference for new turns.
     /// `default` means the user explicitly selected standard routing.
@@ -1755,6 +1761,8 @@ impl Config {
             }),
             personality: self.personality,
             model_catalog: self.model_catalog.clone(),
+            provider_parity: self.provider_parity.enabled,
+            freeform_tools_as_text: self.provider_parity.downgrade_freeform_to_text(),
         }
     }
 
@@ -2797,6 +2805,38 @@ fn resolve_update_plan_enabled(config_toml: &ConfigToml) -> bool {
 
 fn resolve_feature_enabled(feature: Option<&codex_config::config_toml::FeatureToggleToml>) -> bool {
     feature.and_then(|feature| feature.enabled).unwrap_or(true)
+}
+
+fn resolve_provider_parity(
+    parity: Option<&ProviderParityToml>,
+    model_provider_id: &str,
+) -> crate::provider_parity::ProviderParityConfig {
+    use crate::provider_parity::DeveloperRoleMode;
+    use crate::provider_parity::FreeformToolFormatMode;
+    let enabled = parity
+        .and_then(|parity| parity.enabled)
+        .unwrap_or_else(|| model_provider_id != codex_model_provider_info::OPENAI_PROVIDER_ID);
+    let freeform_tool_format = match parity
+        .and_then(|parity| parity.freeform_tool_format)
+        .unwrap_or(FreeformToolFormatToml::Auto)
+    {
+        FreeformToolFormatToml::Auto => FreeformToolFormatMode::Auto,
+        FreeformToolFormatToml::Grammar => FreeformToolFormatMode::Grammar,
+        FreeformToolFormatToml::Text => FreeformToolFormatMode::Text,
+    };
+    let developer_role = match parity
+        .and_then(|parity| parity.developer_role)
+        .unwrap_or(DeveloperRoleToml::Auto)
+    {
+        DeveloperRoleToml::Auto => DeveloperRoleMode::Auto,
+        DeveloperRoleToml::Developer => DeveloperRoleMode::Developer,
+        DeveloperRoleToml::System => DeveloperRoleMode::System,
+    };
+    crate::provider_parity::ProviderParityConfig {
+        enabled,
+        freeform_tool_format,
+        developer_role,
+    }
 }
 
 fn resolve_code_mode_config(config_toml: &ConfigToml) -> CodeModeConfig {
@@ -4482,6 +4522,10 @@ impl Config {
             prefer_mxc,
             model,
             daybreak_enabled: cfg.daybreak.unwrap_or(false),
+            provider_parity: resolve_provider_parity(
+                cfg.provider_parity.as_ref(),
+                model_provider_id.as_str(),
+            ),
             service_tier,
             review_model,
             model_context_window: cfg.model_context_window,

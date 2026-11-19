@@ -179,6 +179,8 @@ pub(crate) struct ModelInfoOverrides {
     pub(crate) auto_compact_token_limit: Option<i64>,
     pub(crate) tool_output_token_limit: Option<usize>,
     pub(crate) base_instructions: Option<String>,
+    pub(crate) provider_parity: bool,
+    pub(crate) freeform_tools_as_text: bool,
 }
 
 impl From<ModelsManagerConfig> for ModelInfoOverrides {
@@ -188,6 +190,8 @@ impl From<ModelsManagerConfig> for ModelInfoOverrides {
             auto_compact_token_limit: config.model_auto_compact_token_limit,
             tool_output_token_limit: config.tool_output_token_limit,
             base_instructions: config.base_instructions,
+            provider_parity: config.provider_parity,
+            freeform_tools_as_text: config.freeform_tools_as_text,
         }
     }
 }
@@ -205,6 +209,8 @@ impl ModelInfoOverrides {
             personality,
             // The models manager already owns its catalog.
             model_catalog: None,
+            provider_parity: self.provider_parity,
+            freeform_tools_as_text: self.freeform_tools_as_text,
         }
     }
 }

@@ -82,6 +82,7 @@ mod agent_message_board;
 pub use agent_message_board::install_agent_message_board;
 mod attestation;
 mod code_mode_host;
+mod provider_parity;
 mod codex_delegate;
 mod command_canonicalization;
 pub mod config;

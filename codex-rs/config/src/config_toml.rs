@@ -162,6 +162,49 @@ pub struct FeatureToggleToml {
     pub enabled: Option<bool>,
 }
 
+/// Free-form tool format downgrade for providers that reject constrained
+/// decoding (`format: {"type": "grammar"}`) on custom tools.
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Default, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum FreeformToolFormatToml {
+    /// Downgrade to plain text when provider parity is enabled.
+    #[default]
+    Auto,
+    /// Keep the upstream lark grammar.
+    Grammar,
+    /// Always send free-form text custom tools.
+    Text,
+}
+
+/// Role used for base/developer instructions on third-party endpoints.
+///
+/// The Responses API uses the `developer` role, but some OpenAI-compatible
+/// backends only understand `system`.
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Default, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum DeveloperRoleToml {
+    /// Rewrite `developer` to `system` whenever provider parity is enabled.
+    #[default]
+    Auto,
+    /// Keep the upstream `developer` role.
+    Developer,
+    /// Always send instructions as the `system` role.
+    System,
+}
+
+/// Keeps the OpenAI provider tool surface when Codex talks to a third-party
+/// OpenAI-compatible endpoint.
+#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct ProviderParityToml {
+    /// Defaults to true for every provider except `openai`.
+    pub enabled: Option<bool>,
+    /// Defaults to `auto`.
+    pub freeform_tool_format: Option<FreeformToolFormatToml>,
+    /// Defaults to `auto` (rewrite `developer` to `system` under parity).
+    pub developer_role: Option<DeveloperRoleToml>,
+}
+
 /// Base config deserialized from ~/.codex/config.toml.
 #[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq, JsonSchema)]
 #[schemars(deny_unknown_fields)]
@@ -175,6 +218,9 @@ pub struct ConfigToml {
 
     /// Provider to use from the model_providers map.
     pub model_provider: Option<String>,
+
+    /// Keep the OpenAI tool surface on third-party providers.
+    pub provider_parity: Option<ProviderParityToml>,
 
     /// Size of the context window for the model, in tokens.
     pub model_context_window: Option<i64>,

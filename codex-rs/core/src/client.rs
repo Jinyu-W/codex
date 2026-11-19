@@ -222,6 +222,8 @@ struct ModelClientState {
     cached_websocket_session: StdMutex<WebsocketSession>,
     /// Last full tool list used for sampling, retained across turns and connection resets.
     last_inference_tools: StdMutex<Option<Arc<[ToolSpec]>>>,
+    /// OpenAI-equivalent tool surface for third-party providers.
+    provider_parity: crate::provider_parity::ProviderParityConfig,
 }
 
 enum ClientRouting {
@@ -603,6 +605,7 @@ impl ModelClient {
                 agent_identity_session_fallback: AgentIdentitySessionFallback::default(),
                 cached_websocket_session: StdMutex::new(WebsocketSession::default()),
                 last_inference_tools: StdMutex::new(None),
+                provider_parity: crate::provider_parity::ProviderParityConfig::default(),
             }),
             agent_identity_policy,
             prompt_cache_key_policy: PromptCacheKey::default(),
@@ -627,6 +630,16 @@ impl ModelClient {
         self.state.reasoning_effort_override_enabled
             && self.state.provider.info().is_openai()
             && model_info.supports_reasoning_effort_updates
+    }
+
+    pub(crate) fn with_provider_parity(
+        mut self,
+        provider_parity: crate::provider_parity::ProviderParityConfig,
+    ) -> Self {
+        if let Some(state) = Arc::get_mut(&mut self.state) {
+            state.provider_parity = provider_parity;
+        }
+        self
     }
 
     pub(crate) fn with_restored_history(mut self, restored_history: bool) -> Self {
@@ -1026,6 +1039,11 @@ impl ModelClient {
                 });
             }
             None
+        } else if self.state.provider_parity.downgrade_freeform_to_text() {
+            Some(
+                codex_tools::create_tools_raw_json_for_responses_api_with_freeform_text(&prompt.tools)?
+                    .into(),
+            )
         } else {
             Some(create_tools_raw_json_for_responses_api(&prompt.tools)?.into())
         };
@@ -1065,6 +1083,25 @@ impl ModelClient {
                     *encrypted_function_args = None;
                 }
             }
+        }
+        if self.state.provider_parity.enabled {
+            // Third-party gateways reject the content-item array form of tool
+            // output and accept only a plain string.
+            for item in &mut input {
+                crate::provider_parity::flatten_tool_output_to_text(item);
+            }
+        }
+        if self.state.provider_parity.rewrite_developer_as_system() {
+            // Some backends (e.g. Kimi behind the LiteLLM gateway) reject the
+            // Responses API `developer` role and only accept `system`.
+            for item in &mut input {
+                crate::provider_parity::rewrite_developer_role_to_system(item);
+            }
+        }
+        if self.state.provider_parity.rewrite_agent_messages() {
+            // Multi-agent turns emit `agent_message` input items; gateways only
+            // validate `message`, so downgrade (or drop, when encrypted-only).
+            input.retain_mut(crate::provider_parity::rewrite_agent_message_as_assistant_text);
         }
         let reasoning = self.build_reasoning(model_info, effort, summary);
         let stream_options = (self.state.concurrent_reasoning_summaries_enabled
