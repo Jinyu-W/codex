@@ -443,6 +443,36 @@ impl FeatureConfig for RolloutBudgetConfigToml {
     }
 }
 
+/// Wall-clock budget reporting for the current-time reminder.
+///
+/// Both `deadline_epoch` and `budget_seconds` are supplied by the caller; this
+/// crate only carries them. When both are present the absolute deadline wins.
+#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SessionTimeBudgetConfigToml {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub enabled: Option<bool>,
+    /// Absolute Unix deadline in seconds. Takes precedence over `budget_seconds`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub deadline_epoch: Option<i64>,
+    /// Relative budget measured from the session start, in seconds.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub budget_seconds: Option<u64>,
+    /// Remaining-time fractions at which one threshold reminder is injected.
+    /// Sorted descending and de-duplicated by the config resolver.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reminder_remaining_fractions: Option<Vec<f64>>,
+    /// Append the convergence hint at the tightest threshold. Defaults to off.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub convergence_hint: Option<bool>,
+}
+
+impl FeatureConfig for SessionTimeBudgetConfigToml {
+    fn enabled(&self) -> Option<bool> {
+        self.enabled
+    }
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, Default, PartialEq, Eq, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum CurrentTimeSource {

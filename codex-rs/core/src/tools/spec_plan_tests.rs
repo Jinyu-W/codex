@@ -1169,6 +1169,33 @@ async fn sleep_tool_follows_current_time_config() {
 }
 
 #[tokio::test]
+async fn session_time_budget_does_not_change_tool_specs() {
+    let baseline = probe(|turn| {
+        set_feature(turn, Feature::CurrentTimeReminder, /*enabled*/ true);
+    })
+    .await;
+    let with_budget = probe(|turn| {
+        set_features(
+            turn,
+            &[Feature::CurrentTimeReminder, Feature::SessionTimeBudget],
+        );
+    })
+    .await;
+    let baseline_json =
+        serde_json::to_string(&baseline.visible_specs).expect("serialize baseline tools");
+    let budget_json =
+        serde_json::to_string(&with_budget.visible_specs).expect("serialize budget tools");
+    println!(
+        "TOOLS-FIXTURE baseline_bytes={} budget_bytes={} byte_equal={}",
+        baseline_json.len(),
+        budget_json.len(),
+        baseline_json == budget_json
+    );
+    assert_eq!(baseline_json, budget_json);
+    assert_eq!(with_budget, baseline);
+}
+
+#[tokio::test]
 async fn sleep_tool_stays_direct_and_outside_code_mode() {
     for code_mode_only in [false, true] {
         let plan = probe(|turn| {

@@ -1576,6 +1576,9 @@ impl Session {
                     &config.features,
                 ),
             );
+            state
+                .current_time_reminder
+                .initialize_session_start(initial_session_start(&initial_history));
             state.base_instructions_provenance = base_instructions_provenance.clone();
             // Restore a provided effort baseline before startup prewarm can establish a new one.
             if let Some(pin) = thread_extension_data.remove::<ReasoningEffortPin>() {
@@ -2048,6 +2051,38 @@ impl Session {
                 }
                 Err(err)
             }
+        }
+    }
+}
+
+/// Resolve the session start for wall-clock budget reporting.
+///
+/// A resumed session uses the canonical `SessionMeta` whose `id` equals the
+/// resumed conversation id; a missing or unparsable record is `Unavailable`
+/// (fail closed, never substitute the current time). New and same-process
+/// forked sessions initialize from the first observed clock reading.
+pub(super) fn initial_session_start(
+    initial_history: &InitialHistory,
+) -> super::time_reminder::SessionStart {
+    match initial_history {
+        InitialHistory::Resumed(resumed) => resumed
+            .history
+            .iter()
+            .find_map(|item| match item {
+                RolloutItem::SessionMeta(meta) if meta.meta.id == resumed.conversation_id => {
+                    Some(meta.meta.timestamp.as_str())
+                }
+                _ => None,
+            })
+            .and_then(|timestamp| {
+                chrono::DateTime::parse_from_rfc3339(timestamp)
+                    .ok()
+                    .map(|parsed| parsed.with_timezone(&chrono::Utc))
+            })
+            .map(super::time_reminder::SessionStart::Known)
+            .unwrap_or(super::time_reminder::SessionStart::Unavailable),
+        InitialHistory::New | InitialHistory::Cleared | InitialHistory::Forked(_) => {
+            super::time_reminder::SessionStart::Unresolved
         }
     }
 }
