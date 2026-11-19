@@ -23,6 +23,7 @@ pub use feature_configs::CodeModeHostConfigToml;
 pub use feature_configs::ContextManagementConfigToml;
 pub use feature_configs::CurrentTimeReminderConfigToml;
 pub use feature_configs::CurrentTimeReminderDeliveryMode;
+pub use feature_configs::SessionTimeBudgetConfigToml;
 pub use feature_configs::CurrentTimeSource;
 pub use feature_configs::GuardianV2ConfigToml;
 pub use feature_configs::GuardianV2ReviewScopeConfigToml;
@@ -420,6 +421,8 @@ pub enum Feature {
     ReasoningEffortOverride,
     /// Add current-time reminders to model-visible context.
     CurrentTimeReminder,
+    /// Add session elapsed/remaining wall-clock figures to the time reminder.
+    SessionTimeBudget,
     /// Report failed clock reads to the model without failing the turn.
     NonfatalClockReadErrors,
     /// Route MCP tool approval prompts through the MCP elicitation request path.
@@ -919,6 +922,8 @@ pub struct FeaturesToml {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub current_time_reminder: Option<FeatureToml<CurrentTimeReminderConfigToml>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_time_budget: Option<FeatureToml<SessionTimeBudgetConfigToml>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sleep_tool: Option<FeatureToml<SleepToolConfigToml>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub runtime_agent_instances: Option<FeatureToml<RuntimeAgentInstancesConfigToml>>,
@@ -994,6 +999,13 @@ impl FeaturesToml {
             .and_then(FeatureToml::enabled)
         {
             entries.insert(Feature::CurrentTimeReminder.key().to_string(), enabled);
+        }
+        if let Some(enabled) = self
+            .session_time_budget
+            .as_ref()
+            .and_then(FeatureToml::enabled)
+        {
+            entries.insert(Feature::SessionTimeBudget.key().to_string(), enabled);
         }
         if let Some(enabled) = self.network_proxy.as_ref().and_then(FeatureToml::enabled) {
             entries.insert(Feature::NetworkProxy.key().to_string(), enabled);
@@ -2025,6 +2037,12 @@ pub const FEATURES: &[FeatureSpec] = &[
     FeatureSpec {
         id: Feature::CurrentTimeReminder,
         key: "current_time_reminder",
+        stage: Stage::UnderDevelopment,
+        default_enabled: false,
+    },
+    FeatureSpec {
+        id: Feature::SessionTimeBudget,
+        key: "session_time_budget",
         stage: Stage::UnderDevelopment,
         default_enabled: false,
     },

@@ -13891,3 +13891,110 @@ fn sqlite_home_env_conflict_reports_an_override() -> std::io::Result<()> {
 
     Ok(())
 }
+
+async fn load_session_time_budget_config(config_toml: &str) -> std::io::Result<Config> {
+    let codex_home = tempdir()?;
+    let config_toml = toml::from_str(config_toml).expect("TOML should deserialize");
+    Config::load_from_base_config_with_overrides(
+        config_toml,
+        ConfigOverrides::default(),
+        codex_home.abs(),
+    )
+    .await
+}
+
+// T6: invalid budget values and the missing delivery channel are hard errors.
+#[tokio::test]
+async fn session_time_budget_rejects_invalid_values() -> std::io::Result<()> {
+    for (config_toml, needle) in [
+        (
+            r#"
+[features.current_time_reminder]
+enabled = true
+
+[features.session_time_budget]
+enabled = true
+budget_seconds = 0
+"#,
+            "budget_seconds must be > 0",
+        ),
+        (
+            r#"
+[features.current_time_reminder]
+enabled = true
+
+[features.session_time_budget]
+enabled = true
+deadline_epoch = -1
+"#,
+            "deadline_epoch must be > 0",
+        ),
+        (
+            r#"
+[features.current_time_reminder]
+enabled = true
+
+[features.session_time_budget]
+enabled = true
+budget_seconds = 60
+reminder_remaining_fractions = [1.0]
+"#,
+            "reminder_remaining_fractions",
+        ),
+        (
+            r#"
+[features.session_time_budget]
+enabled = true
+budget_seconds = 60
+"#,
+            "requires features.current_time_reminder",
+        ),
+    ] {
+        let error = load_session_time_budget_config(config_toml)
+            .await
+            .expect_err("config must be rejected");
+        assert!(
+            error.to_string().contains(needle),
+            "expected {needle:?} in {error}"
+        );
+    }
+    Ok(())
+}
+
+#[tokio::test]
+async fn session_time_budget_normalizes_fractions() -> std::io::Result<()> {
+    let config = load_session_time_budget_config(
+        r#"
+[features.current_time_reminder]
+enabled = true
+
+[features.session_time_budget]
+enabled = true
+budget_seconds = 28800
+reminder_remaining_fractions = [0.25, 0.5, 0.25]
+convergence_hint = true
+"#,
+    )
+    .await?;
+    let budget = config.session_time_budget.expect("enabled");
+    assert_eq!(budget.budget_seconds, Some(28_800));
+    assert_eq!(budget.deadline_epoch, None);
+    assert_eq!(budget.reminder_remaining_fractions, vec![0.5, 0.25]);
+    assert!(budget.convergence_hint);
+    Ok(())
+}
+
+#[tokio::test]
+async fn session_time_budget_disabled_resolves_none() -> std::io::Result<()> {
+    let config = load_session_time_budget_config(
+        r#"
+[features]
+current_time_reminder = true
+session_time_budget = false
+"#,
+    )
+    .await?;
+    assert!(config.session_time_budget.is_none());
+    assert!(config.current_time_reminder.is_some());
+    Ok(())
+}

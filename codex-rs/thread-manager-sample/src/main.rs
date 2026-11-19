@@ -387,6 +387,7 @@ async fn new_config(
         token_budget_startup_config: None,
         rollout_budget: None,
         current_time_reminder: None,
+        session_time_budget: None,
         sleep_tool_mode: Default::default(),
         features: Default::default(),
         prefer_mxc: false,

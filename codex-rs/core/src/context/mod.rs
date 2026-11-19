@@ -77,7 +77,11 @@ pub(crate) use contextual_user_message::is_guardian_context_message;
 pub(crate) use contextual_user_message::is_user_authorization_message;
 pub(crate) use contextual_user_message::parse_visible_hook_prompt_message;
 pub(crate) use current_time_reminder::CurrentTimeReminder;
+pub(crate) use current_time_reminder::SessionBudgetThreshold;
+pub(crate) use current_time_reminder::SessionBudgetView;
 pub(crate) use current_time_reminder::CurrentTimeUnavailable;
+#[cfg(test)]
+pub(crate) use current_time_reminder::render_reminder_body;
 pub(crate) use developer_instructions::DeveloperInstructions;
 pub(crate) use environments_instructions::EnvironmentsInstructions;
 pub(crate) use guardian_approved_action::GuardianApprovedAction;

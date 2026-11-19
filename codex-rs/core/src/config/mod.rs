@@ -74,6 +74,7 @@ use codex_features::FeatureToml;
 use codex_features::Features;
 use codex_features::FeaturesToml;
 use codex_features::MultiAgentV2ConfigToml;
+use codex_features::SessionTimeBudgetConfigToml;
 use codex_features::NetworkProxyConfigToml;
 use codex_features::SleepToolMode;
 use codex_features::TokenBudgetConfigToml;
@@ -1152,6 +1153,8 @@ pub struct Config {
     pub rollout_budget: Option<RolloutBudgetConfig>,
     /// Current-time reminder and clock tool configuration, when enabled.
     pub current_time_reminder: Option<CurrentTimeReminderConfig>,
+    /// Wall-clock session budget reporting, when enabled.
+    pub session_time_budget: Option<SessionTimeBudgetConfig>,
     /// How the sleep tool is selected when its feature gate is enabled.
     pub sleep_tool_mode: SleepToolMode,
 
@@ -1374,6 +1377,15 @@ impl Default for CurrentTimeReminderConfig {
             sleep_tool: false,
         }
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct SessionTimeBudgetConfig {
+    pub deadline_epoch: Option<i64>,
+    pub budget_seconds: Option<u64>,
+    /// Remaining-time thresholds in seconds, sorted descending, de-duplicated.
+    pub reminder_remaining_fractions: Vec<f64>,
+    pub convergence_hint: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -3081,6 +3093,71 @@ fn resolve_terminal_resize_reflow_config(config_toml: &ConfigToml) -> TerminalRe
     }
 }
 
+fn resolve_session_time_budget_config(
+    config_toml: &ConfigToml,
+    features: &ManagedFeatures,
+) -> std::io::Result<Option<SessionTimeBudgetConfig>> {
+    if !features.enabled(Feature::SessionTimeBudget) {
+        return Ok(None);
+    }
+    if !features.enabled(Feature::CurrentTimeReminder) {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "features.session_time_budget requires features.current_time_reminder: the time reminder is the only delivery channel",
+        ));
+    }
+
+    let raw = session_time_budget_toml_config(config_toml.features.as_ref());
+    let deadline_epoch = raw.and_then(|config| config.deadline_epoch);
+    let budget_seconds = raw.and_then(|config| config.budget_seconds);
+    if let Some(deadline_epoch) = deadline_epoch
+        && deadline_epoch <= 0
+    {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "features.session_time_budget.deadline_epoch must be > 0; omit it to disable the absolute deadline",
+        ));
+    }
+    if budget_seconds == Some(0) {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "features.session_time_budget.budget_seconds must be > 0; omit it to disable the budget",
+        ));
+    }
+
+    let mut reminder_remaining_fractions = raw
+        .and_then(|config| config.reminder_remaining_fractions.clone())
+        .unwrap_or_default();
+    for fraction in &reminder_remaining_fractions {
+        if !fraction.is_finite() || *fraction <= 0.0 || *fraction >= 1.0 {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "features.session_time_budget.reminder_remaining_fractions values must be finite and in (0, 1)",
+            ));
+        }
+    }
+    reminder_remaining_fractions.sort_by(|a, b| {
+        b.partial_cmp(a)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    reminder_remaining_fractions.dedup_by(|a, b| (*a - *b).abs() < f64::EPSILON);
+    if reminder_remaining_fractions.len() > 8 {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "features.session_time_budget.reminder_remaining_fractions accepts at most 8 distinct values",
+        ));
+    }
+
+    Ok(Some(SessionTimeBudgetConfig {
+        deadline_epoch,
+        budget_seconds,
+        reminder_remaining_fractions,
+        convergence_hint: raw
+            .and_then(|config| config.convergence_hint)
+            .unwrap_or(false),
+    }))
+}
+
 fn code_mode_toml_config(features: Option<&FeaturesToml>) -> Option<&CodeModeConfigToml> {
     match features?.code_mode.as_ref()? {
         FeatureToml::Enabled(_) => None,
@@ -3106,6 +3183,15 @@ fn current_time_reminder_toml_config(
     features: Option<&FeaturesToml>,
 ) -> Option<&CurrentTimeReminderConfigToml> {
     match features?.current_time_reminder.as_ref()? {
+        FeatureToml::Enabled(_) => None,
+        FeatureToml::Config(config) => Some(config),
+    }
+}
+
+fn session_time_budget_toml_config(
+    features: Option<&FeaturesToml>,
+) -> Option<&SessionTimeBudgetConfigToml> {
+    match features?.session_time_budget.as_ref()? {
         FeatureToml::Enabled(_) => None,
         FeatureToml::Config(config) => Some(config),
     }
@@ -3962,6 +4048,7 @@ impl Config {
         let token_budget = resolve_token_budget_config(&cfg, &features)?;
         let rollout_budget = resolve_rollout_budget_config(&cfg, &features)?;
         let current_time_reminder = resolve_current_time_reminder_config(&cfg, &features)?;
+        let session_time_budget = resolve_session_time_budget_config(&cfg, &features)?;
         let sleep_tool_mode = cfg
             .features
             .as_ref()
@@ -4682,6 +4769,7 @@ impl Config {
             token_budget_startup_config: None,
             rollout_budget,
             current_time_reminder,
+            session_time_budget,
             sleep_tool_mode,
             features,
             runtime_feature_defaults: BTreeMap::new(),
