@@ -9,6 +9,7 @@ mod compaction_summary;
 mod content_filter_guidance;
 mod contextual_user_message;
 mod current_time_reminder;
+pub(crate) mod delivery_self_check;
 mod developer_instructions;
 mod environment_context;
 mod environments_instructions;
