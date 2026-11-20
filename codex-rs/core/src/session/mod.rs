@@ -4645,12 +4645,21 @@ impl Session {
             crate::guardian::is_basic_session_source(&session_source);
         // Keep the guardian policy prompt out of the aggregated developer bundle so it
         // stays isolated as its own top-level developer message for guardian subagents.
-        if !separate_guardian_developer_message
-            && let Some(developer_instructions) = turn_context.developer_instructions.as_deref()
-            && !developer_instructions.is_empty()
-        {
-            developer_sections
-                .push(DeveloperInstructions::new(developer_instructions).render_fragment());
+        if !separate_guardian_developer_message {
+            let developer_instructions =
+                crate::context::delivery_self_check::compose_developer_instructions_with_self_check(
+                    turn_context.developer_instructions.as_deref(),
+                    turn_context
+                        .config
+                        .features
+                        .enabled(Feature::DeliverySelfCheck),
+                );
+            if let Some(developer_instructions) = developer_instructions
+                && !developer_instructions.is_empty()
+            {
+                developer_sections
+                    .push(DeveloperInstructions::new(developer_instructions).render_fragment());
+            }
         }
         let loaded_plugins = self
             .services

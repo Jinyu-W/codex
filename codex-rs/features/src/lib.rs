@@ -423,6 +423,8 @@ pub enum Feature {
     CurrentTimeReminder,
     /// Add session elapsed/remaining wall-clock figures to the time reminder.
     SessionTimeBudget,
+    /// Append a pre-delivery self-check line recording where validation evidence came from.
+    DeliverySelfCheck,
     /// Report failed clock reads to the model without failing the turn.
     NonfatalClockReadErrors,
     /// Route MCP tool approval prompts through the MCP elicitation request path.
@@ -2043,6 +2045,12 @@ pub const FEATURES: &[FeatureSpec] = &[
     FeatureSpec {
         id: Feature::SessionTimeBudget,
         key: "session_time_budget",
+        stage: Stage::UnderDevelopment,
+        default_enabled: false,
+    },
+    FeatureSpec {
+        id: Feature::DeliverySelfCheck,
+        key: "delivery_self_check",
         stage: Stage::UnderDevelopment,
         default_enabled: false,
     },
